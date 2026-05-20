@@ -1,115 +1,238 @@
-`timescale 1ns/1ps
+`timescale 1ns / 1ps
+
+`include "UART_LOOPBACK.v"
+`include "uart_ref_model.v"
 
 module tb_uart;
 
-parameter freq=50000000;
-parameter baudr=2400;
-parameter width=8;
+parameter WORD = 8;
+parameter CLK_FREQ = 50000000;
+parameter BAUD = 2400;
 
 reg sys_clk;
-reg sys_rst;
-reg xmit_h;
-reg [width-1:0] xmit_data_h;
-reg uart_rec_data_h;
+reg sys_rst_l;
 
-wire uart_clk;
-wire uart_xmit_data_h;
-wire xmit_done_h;
-wire [width-1:0] rec_data_h;
-wire rec_ready;
+reg xmitH;
+reg [WORD-1:0] xmit_dataH;
+
+wire rec_readyH;
+wire uart_REC_dataH;
 wire rec_busy;
+wire [WORD-1:0] rec_dataH;
 wire xmit_active;
+wire xmit_doneH;
 
-integer pass_count=0;
-integer fail_count=0;
-integer test_count=0;
+wire ref_rec_readyH;
+wire ref_uart_REC_dataH;
+wire ref_rec_busy;
+wire [WORD-1:0] ref_rec_dataH;
+wire ref_xmit_active;
+wire ref_xmit_doneH;
 
-uart #(.freq(freq),.baudr(baudr),.width(width)) dut(
-.sys_clk(sys_clk),
-.sys_rst(sys_rst),
-.xmit_h(xmit_h),
-.xmit_data_h(xmit_data_h),
-.uart_rec_data_h(uart_rec_data_h),
-.uart_clk(uart_clk),
-.uart_xmit_data_h(uart_xmit_data_h),
-.xmit_done_h(xmit_done_h),
-.rec_data_h(rec_data_h),
-.rec_ready(rec_ready),
-.rec_busy(rec_busy),
-.xmit_active(xmit_active)
+integer pass_count;
+integer fail_count;
+integer test_count;
+integer i;
+
+UART_LOOPBACK #(
+    .WORD(WORD),
+    .CLK_FREQ(CLK_FREQ),
+    .BAUD(BAUD)
+) dut (
+    .sys_clk(sys_clk),
+    .sys_rst_l(sys_rst_l),
+
+    .xmitH(xmitH),
+    .xmit_dataH(xmit_dataH),
+
+    .rec_readyH(rec_readyH),
+    .uart_REC_dataH(uart_REC_dataH),
+    .rec_busy(rec_busy),
+    .rec_dataH(rec_dataH),
+
+    .xmit_active(xmit_active),
+    .xmit_doneH(xmit_doneH)
 );
 
-initial begin
-    sys_clk=0;
-    forever #10 sys_clk=~sys_clk;
+uart_ref_model #(
+    .WORD(WORD)
+) ref_model (
+    .sys_clk(sys_clk),
+    .sys_rst_l(sys_rst_l),
+
+    .xmitH(xmitH),
+    .xmit_dataH(xmit_dataH),
+
+    .rec_readyH(ref_rec_readyH),
+    .uart_REC_dataH(ref_uart_REC_dataH),
+    .rec_busy(ref_rec_busy),
+    .rec_dataH(ref_rec_dataH),
+
+    .xmit_active(ref_xmit_active),
+    .xmit_doneH(ref_xmit_doneH)
+);
+
+initial
+begin
+    sys_clk = 0;
+    forever #10 sys_clk = ~sys_clk;
 end
 
-initial begin
-
-    sys_rst=0;
-    xmit_h=0;
-    xmit_data_h=0;
-    uart_rec_data_h=1;
-
-    #100;
-    sys_rst=1;
-
-    @(posedge sys_clk);
-
-    $display("\n===== UART LOOPBACK TEST =====\n");
-
-    uart_send(8'hA5,"TEST1_A5");
-    uart_send(8'h3C,"TEST2_3C");
-    uart_send(8'hF0,"TEST3_F0");
-    uart_send(8'h55,"TEST4_55");
-
-    $display("\n===== TEST SUMMARY =====");
-    $display("TOTAL=%0d",test_count);
-    $display("PASS=%0d",pass_count);
-    $display("FAIL=%0d",fail_count);
-
-    #1000;
-    $finish;
-
+initial
+begin
+    $dumpfile("tb_uart.vcd");
+    $dumpvars(0,tb_uart);
 end
 
-task uart_send;
-
-input [width-1:0] data;
-input [80*8:1] test_name;
-
+task send_data;
+input [WORD-1:0] data;
 begin
 
-    @(posedge uart_clk);
+    @(posedge dut.B1.baud_clk);
 
-    xmit_data_h=data;
-    xmit_h=1'b1;
+    xmit_dataH = data;
+    xmitH = 1'b1;
 
-    @(posedge uart_clk);
-    xmit_h=1'b0;
+    @(posedge dut.B1.baud_clk);
 
-    wait(rec_busy==1'b1);
-    wait(rec_busy==1'b0);
+    xmitH = 1'b0;
 
-    @(posedge uart_clk);
+    wait(xmit_doneH == 1'b1);
 
-    test_count=test_count+1;
+    repeat(5) @(posedge dut.B1.baud_clk);
 
-    if(rec_data_h==data) begin
-        $display("[PASS] %s DATA=0x%h RECEIVED=0x%h",test_name,data,rec_data_h);
-        pass_count=pass_count+1;
+    test_count = test_count + 1;
+
+    if(rec_dataH == ref_rec_dataH)
+    begin
+        $display("[PASS] DATA = %h DUT_RX = %h REF_RX = %h",
+                 data,
+                 rec_dataH,
+                 ref_rec_dataH);
+
+        pass_count = pass_count + 1;
     end
-    else begin
-        $display("[FAIL] %s DATA=0x%h RECEIVED=0x%h",test_name,data,rec_data_h);
-        fail_count=fail_count+1;
+    else
+    begin
+        $display("[FAIL] DATA = %h DUT_RX = %h REF_RX = %h",
+                 data,
+                 rec_dataH,
+                 ref_rec_dataH);
+
+        fail_count = fail_count + 1;
     end
 
 end
 endtask
 
-initial begin
-    $dumpfile("uart.vcd");
-    $dumpvars(0,tb_uart);
+task reset_test;
+begin
+
+    sys_rst_l = 0;
+
+    repeat(20) @(posedge sys_clk);
+
+    sys_rst_l = 1;
+
+    repeat(20) @(posedge sys_clk);
+
+    test_count = test_count + 1;
+
+    if((xmit_active == 0) &&
+       (rec_busy == 0))
+    begin
+        $display("[PASS] RESET TEST");
+        pass_count = pass_count + 1;
+    end
+    else
+    begin
+        $display("[FAIL] RESET TEST");
+        fail_count = fail_count + 1;
+    end
+
+end
+endtask
+
+initial
+begin
+
+    pass_count = 0;
+    fail_count = 0;
+    test_count = 0;
+
+    sys_rst_l = 0;
+    xmitH = 0;
+    xmit_dataH = 0;
+
+    #200;
+
+    sys_rst_l = 1;
+
+    repeat(20) @(posedge dut.B1.baud_clk);
+
+    reset_test();
+
+    send_data(8'h00);
+    send_data(8'hFF);
+    send_data(8'hAA);
+    send_data(8'h55);
+    send_data(8'h0F);
+    send_data(8'hF0);
+    send_data(8'h81);
+    send_data(8'h7E);
+
+    for(i=0;i<100;i=i+1)
+    begin
+        send_data($random);
+    end
+
+    for(i=0;i<20;i=i+1)
+    begin
+        send_data(i);
+    end
+
+    @(posedge dut.B1.baud_clk);
+
+    xmit_dataH = 8'h3C;
+    xmitH = 1'b1;
+
+    @(posedge dut.B1.baud_clk);
+
+    xmitH = 1'b0;
+
+    repeat(10) @(posedge dut.B1.baud_clk);
+
+    sys_rst_l = 0;
+
+    repeat(5) @(posedge dut.B1.baud_clk);
+
+    sys_rst_l = 1;
+
+    repeat(20) @(posedge dut.B1.baud_clk);
+
+    send_data(8'hA5);
+
+    $display("----------------------------------");
+    $display("TOTAL TESTS = %0d", test_count);
+    $display("PASS COUNT  = %0d", pass_count);
+    $display("FAIL COUNT  = %0d", fail_count);
+    $display("----------------------------------");
+
+    #1000;
+
+    $finish;
+
+end
+
+initial
+begin
+
+    #50000000;
+
+    $display("SIMULATION TIMEOUT");
+
+    $finish;
+
 end
 
 endmodule
