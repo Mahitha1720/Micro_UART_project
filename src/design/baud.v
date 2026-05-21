@@ -6,7 +6,7 @@ module baud #(parameter freq=`freq,baudr=`baudr)(
     output reg uart_clk
     );
     localparam endcount=(freq/(baudr*16*2));
-    reg [$clog2(endcount):0] count=0;
+    reg [$clog2(endcount)-1:0] count=0;
     always @(posedge sys_clk or negedge sys_rst)
         begin   
             if(!sys_rst) begin uart_clk <=0;count<=0; end
