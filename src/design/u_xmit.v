@@ -15,7 +15,7 @@ module u_xmit #(parameter width = `width)(
                stop  = 2'd3;
     reg [1:0]             ct, nt;
     reg [3:0]             count;
-    reg [$clog2(width):0] index;
+    reg [$clog2(width)-1:0] index;
     reg [width-1:0]       latched_data;
     reg                   out;
 
